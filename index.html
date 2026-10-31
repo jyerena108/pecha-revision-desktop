@@ -210,7 +210,13 @@
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface);
   }
-  .pdf-bar .page-ind { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--fg-dim); min-width: 62px; text-align: center; }
+  .pdf-bar .page-go { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--fg-dim); }
+  .pdf-bar #pageInput {
+    width: 4ch; text-align: center; font-variant-numeric: tabular-nums;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+    border-radius: 6px; padding: 5px 4px; font-size: 13px; font-family: inherit;
+  }
+  .pdf-bar .page-total { font-variant-numeric: tabular-nums; }
   #pdfScroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 16px; }
   #canvasWrap { position: relative; line-height: 0; box-shadow: var(--shadow); }
   #pdfCanvas { display: block; background: #fff; }
@@ -319,7 +325,10 @@
     <section class="pane" id="pdfPane" style="flex: 0 0 50%;">
       <div class="pdf-bar">
         <button class="btn icon" id="prevPage" title="Previous folio" aria-label="Previous folio">‹</button>
-        <span class="page-ind" id="pageInd">— / —</span>
+        <span class="page-go">
+          <input id="pageInput" type="text" inputmode="numeric" value="—" title="Go to folio — type a number and press Enter" aria-label="Go to folio">
+          <span class="page-total" id="pageTotal">/ —</span>
+        </span>
         <button class="btn icon" id="nextPage" title="Next folio" aria-label="Next folio">›</button>
         <div class="sep"></div>
         <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
@@ -412,7 +421,7 @@
     exportTxtBtn: $("exportTxtBtn"), saveInd: $("saveInd"), saveText: $("saveText"),
     themeBtn: $("themeBtn"), layoutBtn: $("layoutBtn"),
     main: $("main"), pdfPane: $("pdfPane"), textPane: $("textPane"), splitter: $("splitter"),
-    prevPage: $("prevPage"), nextPage: $("nextPage"), pageInd: $("pageInd"),
+    prevPage: $("prevPage"), nextPage: $("nextPage"), pageInput: $("pageInput"), pageTotal: $("pageTotal"),
     zoomOut: $("zoomOut"), zoomFit: $("zoomFit"), zoomIn: $("zoomIn"),
     crosshairBtn: $("crosshairBtn"), pdfScroll: $("pdfScroll"), pdfEmpty: $("pdfEmpty"),
     canvasWrap: $("canvasWrap"), canvas: $("pdfCanvas"), crosshair: $("crosshair"),
@@ -624,7 +633,7 @@
   function showPdfEmpty() {
     el.pdfEmpty.classList.remove("hidden");
     el.canvasWrap.classList.add("hidden");
-    el.pageInd.textContent = "— / —";
+    el.pageInput.value = "—"; el.pageTotal.textContent = "/ —";
   }
   async function loadPdfData(arrayBuffer) {
     const task = PDFJS.getDocument({ data: arrayBuffer });
@@ -657,7 +666,8 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
     if (token !== renderToken) return;
-    el.pageInd.textContent = pageNum + " / " + pdfDoc.numPages;
+    if (document.activeElement !== el.pageInput) el.pageInput.value = pageNum;
+    el.pageTotal.textContent = "/ " + pdfDoc.numPages;
     el.prevPage.disabled = pageNum <= 1;
     el.nextPage.disabled = pageNum >= pdfDoc.numPages;
     positionCrosshair();
@@ -1055,6 +1065,15 @@
   });
   el.prevPage.addEventListener("click", () => gotoPage(pageNum - 1));
   el.nextPage.addEventListener("click", () => gotoPage(pageNum + 1));
+  function jumpToTypedPage() {
+    if (!pdfDoc) return;
+    const n = parseInt(el.pageInput.value, 10);
+    if (!isNaN(n)) gotoPage(n);        // gotoPage clamps and resets the field
+    else el.pageInput.value = pageNum;
+  }
+  el.pageInput.addEventListener("focus", () => el.pageInput.select());
+  el.pageInput.addEventListener("change", jumpToTypedPage);
+  el.pageInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); jumpToTypedPage(); el.pageInput.blur(); } });
   el.zoomIn.addEventListener("click", () => { fitMode = false; scale = Math.min(6, scale * 1.2); if (cur) { cur.scale = scale; cur.fitMode = false; } renderPage(); markDirty(); });
   el.zoomOut.addEventListener("click", () => { fitMode = false; scale = Math.max(0.15, scale / 1.2); if (cur) { cur.scale = scale; cur.fitMode = false; } renderPage(); markDirty(); });
   el.zoomFit.addEventListener("click", () => { fitMode = true; if (cur) cur.fitMode = true; renderPage(); markDirty(); });
