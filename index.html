@@ -1,0 +1,1111 @@
+<title>Pecha Revision Tool</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+Tibetan:wght@400;500&display=swap">
+
+<style>
+  /* ── Layout concept ───────────────────────────────────────────────────
+     A full-height workspace: a dark branding band (ported from the Tibetan
+     Collation Tool), a thin control toolbar, then two resizable panes —
+     the pecha scan on the left, the editable OCR text on the right.
+     Everything below is derived from the tokens in :root.                 */
+
+  :root {
+    /* Color — a cool near-neutral ground with a single ochre accent drawn
+       from the pecha's own world (manuscript ink turned gold on dark). */
+    --band: #16181a;            /* the branding band's own dark ground      */
+    --band-rule: rgba(255,255,255,.28);
+    --bg: #f4f5f7;              /* page / app ground                        */
+    --surface: #ffffff;         /* panes, bars                              */
+    --surface-2: #e9ebef;       /* insets, the PDF viewport                 */
+    --fg: #1c2024;              /* primary text                             */
+    --fg-dim: #5c636b;          /* secondary text, captions                 */
+    --line: #d4d8dd;            /* hairlines, borders                       */
+    --accent: #b8860b;          /* ochre — active controls, focus           */
+    --accent-soft: #f3e7c6;     /* accent wash                              */
+    --mark: rgba(230,184,0,.42);/* yellow — permanent bookmark highlight    */
+    --mark-dot: #d9a400;
+    --here: #8a2846;            /* maroon — the single "you are here" text   */
+    --here-mark: rgba(138,40,70,.24);
+    --crosshair: rgba(214,52,52,.30); /* translucent reading cross on the scan */
+    --ok: #2e8b57;
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.05);
+
+    /* Type */
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --tib: "Noto Serif Tibetan", "Jomolhari", "Microsoft Himalaya", "Kailasa", serif;
+    --editor-fs: 22px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a;
+      --surface: #1d2127;
+      --surface-2: #0f1115;
+      --fg: #e7eaee;
+      --fg-dim: #9aa2ad;
+      --line: #313743;
+      --accent: #e0b64a;
+      --accent-soft: #3a331d;
+      --mark: rgba(224,182,74,.34);
+      --mark-dot: #e0b64a;
+      --here: #d86a88;
+      --here-mark: rgba(216,106,136,.32);
+      --crosshair: rgba(255,107,107,.32);
+      --ok: #52c288;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 2px 10px rgba(0,0,0,.35);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161a;
+    --surface: #1d2127;
+    --surface-2: #0f1115;
+    --fg: #e7eaee;
+    --fg-dim: #9aa2ad;
+    --line: #313743;
+    --accent: #e0b64a;
+    --accent-soft: #3a331d;
+    --mark: rgba(224,182,74,.34);
+    --mark-dot: #e0b64a;
+    --here: #d86a88;
+    --here-mark: rgba(216,106,136,.32);
+    --crosshair: rgba(255,107,107,.32);
+    --ok: #52c288;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 2px 10px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--ui);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  * { box-sizing: border-box; }
+  button { font-family: inherit; }
+
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ── Branding band ─────────────────────────────────────────────────── */
+  .band {
+    background: var(--band);
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+  }
+  .band a { display: inline-flex; align-items: center; }
+  .band img { height: 40px; width: auto; display: block; }
+  .band .rule { width: 1px; align-self: stretch; background: var(--band-rule); margin: 4px 0; }
+  .band .wordmark {
+    margin-left: auto;
+    color: #f4f1ea;
+    font-family: var(--tib);
+    font-size: 20px;
+    letter-spacing: .02em;
+    white-space: nowrap;
+  }
+  .band .wordmark small {
+    display: block;
+    font-family: var(--ui);
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: rgba(244,241,234,.6);
+  }
+
+  /* ── Toolbar ───────────────────────────────────────────────────────── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 7px max(16px, env(safe-area-inset-left, 0px));
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .toolbar .group { display: flex; align-items: center; gap: 6px; }
+  .toolbar .sep { width: 1px; height: 22px; background: var(--line); }
+  .spacer { flex: 1 1 auto; }
+
+  select, .btn {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--fg);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    line-height: 1.1;
+  }
+  select { padding-right: 26px; background-image: none; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: translateY(.5px); }
+  .btn.icon { padding: 6px 8px; min-width: 32px; display: inline-flex; align-items: center; justify-content: center; }
+  .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
+  .btn[disabled] { opacity: .4; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1408; font-weight: 600; }
+  :root[data-theme="dark"] .btn.primary,
+  :root:not([data-theme="light"]) .btn.primary { color: #1a1408; }
+  .btn svg { width: 16px; height: 16px; display: block; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .proj-name { font-weight: 600; font-size: 13px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .save-ind { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--fg-dim); }
+  .save-ind .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .save-ind.saving .dot { background: var(--accent); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .save-ind.saving .dot { animation: none; } }
+
+  /* ── Dropdown menu (bookmarks, projects) ───────────────────────────── */
+  .menu-wrap { position: relative; }
+  .menu {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
+    min-width: 200px; max-width: 320px; max-height: 50vh; overflow: auto;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: var(--shadow); padding: 6px;
+  }
+  .menu.right { left: auto; right: 0; }
+  .menu button {
+    display: block; width: 100%; text-align: left; border: 0; background: none;
+    color: var(--fg); padding: 7px 9px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .menu button:hover { background: var(--surface-2); }
+  .menu .tib { font-family: var(--tib); font-size: 15px; }
+  .menu .empty { color: var(--fg-dim); padding: 8px 9px; font-size: 13px; }
+  .menu .mi-row { display: flex; align-items: center; gap: 4px; }
+  .menu .mi-row button.go { flex: 1; display: flex; align-items: center; gap: 8px; }
+  .menu .dot-sm { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
+  .menu .dot-sm.bm { background: var(--mark-dot); }
+  .menu .dot-sm.here { background: var(--here); }
+  .menu .mi-head { padding: 4px 9px 2px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-dim); }
+  .menu .mi-row .del { width: auto; color: var(--crosshair); padding: 7px; }
+
+  /* ── Main split ────────────────────────────────────────────────────── */
+  .main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: row; position: relative; }
+  .main.rows { flex-direction: column; }
+  .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  #pdfPane { background: var(--surface-2); }
+  #textPane { background: var(--surface); }
+
+  .splitter {
+    flex: 0 0 8px; cursor: col-resize; background: var(--surface);
+    border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center; position: relative; z-index: 5;
+  }
+  .splitter::after { content: ""; width: 2px; height: 34px; border-radius: 2px; background: var(--line); }
+  .splitter:hover::after { background: var(--accent); }
+  .main.rows .splitter { cursor: row-resize; border: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .main.rows .splitter::after { width: 34px; height: 2px; }
+
+  /* ── PDF pane ──────────────────────────────────────────────────────── */
+  .pdf-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface);
+  }
+  .pdf-bar .page-ind { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--fg-dim); min-width: 62px; text-align: center; }
+  #pdfScroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 16px; }
+  #canvasWrap { position: relative; line-height: 0; box-shadow: var(--shadow); }
+  #pdfCanvas { display: block; background: #fff; }
+  /* Two translucent lines spanning the whole folio (as on iOS), so the
+     syllables under the cross stay readable. */
+  #crosshair { position: absolute; inset: 0; pointer-events: none; display: none; }
+  #crosshair .ch-h, #crosshair .ch-v { position: absolute; background: var(--crosshair); }
+  #crosshair .ch-h { left: 0; width: 100%; height: 7px; top: var(--cy, 50%); transform: translateY(-50%); }
+  #crosshair .ch-v { top: 0; height: 100%; width: 7px; left: var(--cx, 50%); transform: translateX(-50%); }
+  #canvasWrap.placing { cursor: crosshair; }
+
+  .pdf-empty, .text-empty { margin: auto; text-align: center; color: var(--fg-dim); padding: 24px; max-width: 320px; }
+  .pdf-empty svg { width: 40px; height: 40px; opacity: .6; }
+
+  /* ── Text pane ─────────────────────────────────────────────────────── */
+  .find-bar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 7px 10px; background: var(--accent-soft); border-bottom: 1px solid var(--line);
+  }
+  .find-bar input {
+    font-family: var(--tib); font-size: 16px; padding: 5px 8px;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--fg);
+    min-width: 0; flex: 1 1 120px;
+  }
+  .find-bar .count { font-size: 12px; color: var(--fg-dim); font-variant-numeric: tabular-nums; min-width: 44px; text-align: center; }
+
+  .ed-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface);
+  }
+  .ed-bar .char-ind { font-size: 12px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+
+  .editor-host { flex: 1 1 auto; min-height: 0; position: relative; background: var(--surface); }
+  #backdrop, #editor {
+    position: absolute; inset: 0; margin: 0; border: 0;
+    padding: 14px max(16px, env(safe-area-inset-left,0px)) 14px 14px;
+    font-family: var(--tib); font-size: var(--editor-fs); line-height: 1.9;
+    white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
+    overflow: auto; -webkit-overflow-scrolling: touch;
+  }
+  #backdrop {
+    color: transparent; pointer-events: none; z-index: 1;
+    user-select: none; -webkit-user-select: none;
+  }
+  #backdrop mark { background: var(--mark); color: transparent; border-radius: 2px; }
+  #backdrop mark.here { background: var(--here-mark); }
+  #editor {
+    z-index: 2; background: transparent; color: var(--fg);
+    resize: none; caret-color: var(--accent);
+  }
+  #editor::placeholder { color: var(--fg-dim); }
+
+  /* narrow: shrink the branding band (pane orientation is chosen explicitly) */
+  @media (max-width: 700px) {
+    .band img { height: 30px; }
+    .band .wordmark { font-size: 16px; }
+  }
+
+  .hidden { display: none !important; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+
+<div id="app">
+  <!-- Branding band, ported from the Tibetan Collation Tool -->
+  <div class="band">
+    <a href="https://itas-uni.eu/" target="_blank" rel="noopener" title="International Institute for Tibetan and Asian Studies">
+      <img src="assets/itas-logo.png" alt="ITAS">
+    </a>
+    <div class="rule"></div>
+    <a href="https://www.translating-karmapas.org/" target="_blank" rel="noopener" title="Translating the Karmapas">
+      <img src="assets/karmapas-logo.png" alt="Translating the Karmapas">
+    </a>
+    <div class="wordmark">དཔེ་ཆ་<small>Pecha Revision Tool</small></div>
+  </div>
+
+  <!-- Project / global controls -->
+  <div class="toolbar">
+    <div class="group menu-wrap">
+      <button class="btn" id="projBtn" aria-haspopup="true">Projects ▾</button>
+      <div class="menu hidden" id="projMenu"></div>
+    </div>
+    <button class="btn primary" id="newProjBtn">＋ New</button>
+    <span class="proj-name" id="projName">—</span>
+
+    <div class="sep"></div>
+
+    <div class="group">
+      <button class="btn" id="openPdfBtn">Open PDF</button>
+      <button class="btn" id="importTxtBtn">Import text</button>
+      <button class="btn" id="exportTxtBtn">Export .txt</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <span class="save-ind" id="saveInd"><span class="dot"></span><span id="saveText">Saved</span></span>
+
+    <button class="btn" id="layoutBtn" title="Switch between side-by-side and stacked panes">◫ Side by side</button>
+
+    <div class="group menu-wrap">
+      <button class="btn icon" id="themeBtn" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
+    </div>
+  </div>
+
+  <div class="main" id="main">
+    <!-- PDF pane -->
+    <section class="pane" id="pdfPane" style="flex: 0 0 50%;">
+      <div class="pdf-bar">
+        <button class="btn icon" id="prevPage" title="Previous folio" aria-label="Previous folio">‹</button>
+        <span class="page-ind" id="pageInd">— / —</span>
+        <button class="btn icon" id="nextPage" title="Next folio" aria-label="Next folio">›</button>
+        <div class="sep"></div>
+        <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+        <button class="btn" id="zoomFit" title="Fit width">Fit</button>
+        <button class="btn icon" id="zoomIn" title="Zoom in" aria-label="Zoom in">＋</button>
+        <div class="sep"></div>
+        <button class="btn icon" id="crosshairBtn" title="Reading crosshair — click the scan to place it" aria-label="Reading crosshair">⊕</button>
+      </div>
+      <div id="pdfScroll">
+        <div class="pdf-empty" id="pdfEmpty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h11l5 5v11a0 0 0 0 1 0 0H4z"/><path d="M15 4v5h5"/><circle cx="10.5" cy="14.5" r="2.5"/><path d="m14 18-1.8-1.8"/></svg>
+          <p>No scan loaded. <strong>Open PDF</strong> to load a pecha folio scan.</p>
+        </div>
+        <div id="canvasWrap" class="hidden">
+          <canvas id="pdfCanvas"></canvas>
+          <div id="crosshair"><div class="ch-h"></div><div class="ch-v"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="splitter" id="splitter" role="separator" aria-label="Resize panes"></div>
+
+    <!-- Text pane -->
+    <section class="pane" id="textPane" style="flex: 1 1 0;">
+      <div class="find-bar hidden" id="findBar">
+        <input type="text" id="findInput" placeholder="Find…" aria-label="Find">
+        <span class="count" id="findCount">0 / 0</span>
+        <button class="btn icon" id="findPrev" title="Previous match" aria-label="Previous match">↑</button>
+        <button class="btn icon" id="findNext" title="Next match" aria-label="Next match">↓</button>
+        <input type="text" id="replaceInput" placeholder="Replace with…" aria-label="Replace with">
+        <button class="btn" id="replaceOne">Replace</button>
+        <button class="btn" id="replaceAll">All</button>
+        <button class="btn icon" id="findClose" title="Close find" aria-label="Close find">✕</button>
+      </div>
+
+      <div class="ed-bar">
+        <button class="btn" id="findToggle">Find &amp; Replace</button>
+        <div class="sep"></div>
+        <button class="btn icon" id="fsDown" title="Smaller text" aria-label="Smaller text">A−</button>
+        <button class="btn icon" id="fsUp" title="Larger text" aria-label="Larger text">A＋</button>
+        <div class="sep"></div>
+        <button class="btn" id="bookmarkBtn" title="Bookmark the selected word, or the word at the caret (permanent, yellow)">☆ Bookmark</button>
+        <button class="btn" id="hereBtn" title="Mark where you are in the text — moves the single maroon marker to this word">⦿ Here</button>
+        <div class="menu-wrap">
+          <button class="btn" id="bmListBtn" aria-haspopup="true">Marks ▾</button>
+          <div class="menu right hidden" id="bmMenu"></div>
+        </div>
+        <div class="sep"></div>
+        <button class="btn" id="selectAllBtn" title="Select all text">Select all</button>
+        <button class="btn icon" id="scrollTop" title="Scroll to top" aria-label="Scroll to top">⤒</button>
+        <button class="btn icon" id="scrollBottom" title="Scroll to bottom" aria-label="Scroll to bottom">⤓</button>
+        <div class="spacer"></div>
+        <span class="char-ind" id="charInd">0 / 0</span>
+      </div>
+
+      <div class="editor-host">
+        <div id="backdrop" aria-hidden="true"></div>
+        <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off"
+          placeholder="Import a .txt, paste the OCR text here, or type — then proofread it against the scan."></textarea>
+      </div>
+    </section>
+  </div>
+</div>
+
+<input type="file" id="pdfFile" accept="application/pdf" class="sr">
+<input type="file" id="txtFile" accept=".txt,text/plain" class="sr">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+"use strict";
+(function () {
+  // ── PDF.js worker. Cross-origin Workers are blocked, so wrap the CDN
+  //    worker in a same-origin blob that importScripts it. ────────────────
+  const PDFJS = window.pdfjsLib;
+  try {
+    const wsrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const blob = new Blob(["importScripts('" + wsrc + "');"], { type: "text/javascript" });
+    PDFJS.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+  } catch (e) { /* falls back to the main-thread fake worker */ }
+
+  // Tibetan word separators: whitespace, tsheg, the shad family, and the
+  // Wylie shad "/ |". Mirrors the iOS app so bookmarks snap to the same words.
+  const SEP = new Set([" ", "\n", "\t", "་", "༌", "།",
+    "༎", "༏", "༐", "༑", "༔", "/", "|"]);
+
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    projBtn: $("projBtn"), projMenu: $("projMenu"), newProjBtn: $("newProjBtn"),
+    projName: $("projName"), openPdfBtn: $("openPdfBtn"), importTxtBtn: $("importTxtBtn"),
+    exportTxtBtn: $("exportTxtBtn"), saveInd: $("saveInd"), saveText: $("saveText"),
+    themeBtn: $("themeBtn"), layoutBtn: $("layoutBtn"),
+    main: $("main"), pdfPane: $("pdfPane"), textPane: $("textPane"), splitter: $("splitter"),
+    prevPage: $("prevPage"), nextPage: $("nextPage"), pageInd: $("pageInd"),
+    zoomOut: $("zoomOut"), zoomFit: $("zoomFit"), zoomIn: $("zoomIn"),
+    crosshairBtn: $("crosshairBtn"), pdfScroll: $("pdfScroll"), pdfEmpty: $("pdfEmpty"),
+    canvasWrap: $("canvasWrap"), canvas: $("pdfCanvas"), crosshair: $("crosshair"),
+    findBar: $("findBar"), findInput: $("findInput"), findCount: $("findCount"),
+    findPrev: $("findPrev"), findNext: $("findNext"), replaceInput: $("replaceInput"),
+    replaceOne: $("replaceOne"), replaceAll: $("replaceAll"), findClose: $("findClose"),
+    findToggle: $("findToggle"), fsDown: $("fsDown"), fsUp: $("fsUp"),
+    bookmarkBtn: $("bookmarkBtn"), hereBtn: $("hereBtn"), bmListBtn: $("bmListBtn"), bmMenu: $("bmMenu"),
+    selectAllBtn: $("selectAllBtn"), scrollTop: $("scrollTop"), scrollBottom: $("scrollBottom"), charInd: $("charInd"),
+    backdrop: $("backdrop"), editor: $("editor"),
+    pdfFile: $("pdfFile"), txtFile: $("txtFile"),
+  };
+
+  // ── IndexedDB (projects + PDF blobs) ──────────────────────────────────
+  const DB = (() => {
+    let dbp = null;
+    function open() {
+      if (dbp) return dbp;
+      dbp = new Promise((res, rej) => {
+        const r = indexedDB.open("pecha", 1);
+        r.onupgradeneeded = () => {
+          const d = r.result;
+          if (!d.objectStoreNames.contains("projects")) d.createObjectStore("projects", { keyPath: "id" });
+          if (!d.objectStoreNames.contains("pdfs")) d.createObjectStore("pdfs", { keyPath: "id" });
+        };
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+      return dbp;
+    }
+    function tx(store, mode, fn) {
+      return open().then((d) => new Promise((res, rej) => {
+        const t = d.transaction(store, mode);
+        const s = t.objectStore(store);
+        let out; try { out = fn(s); } catch (e) { rej(e); return; }
+        t.oncomplete = () => res(out && out.result !== undefined ? out.result : out);
+        t.onerror = () => rej(t.error);
+      }));
+    }
+    return {
+      allProjects: () => tx("projects", "readonly", (s) => s.getAll()),
+      putProject: (p) => tx("projects", "readwrite", (s) => s.put(p)),
+      delProject: (id) => tx("projects", "readwrite", (s) => s.delete(id)),
+      getPdf: (id) => tx("pdfs", "readonly", (s) => s.get(id)),
+      putPdf: (id, data, name) => tx("pdfs", "readwrite", (s) => s.put({ id, data, name })),
+      delPdf: (id) => tx("pdfs", "readwrite", (s) => s.delete(id)),
+    };
+  })();
+
+  // ── App state ─────────────────────────────────────────────────────────
+  let projects = [];          // list of project metadata (no pdf blob)
+  let cur = null;             // current project object
+  let pdfDoc = null;          // live PDFDocumentProxy
+  let pageNum = 1;            // 1-based
+  let scale = 1;
+  let fitMode = true;
+  let renderToken = 0;
+  let oldValue = "";          // editor value before the latest edit
+  let matches = [];           // find match ranges [{start,len}]
+  let matchIdx = 0;
+
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+  // ── Theme ──────────────────────────────────────────────────────────────
+  (function initTheme() {
+    let t = null;
+    try { t = localStorage.getItem("pecha-theme"); } catch (e) {}
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+  })();
+  el.themeBtn.addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.getAttribute("data-theme") === "dark" ||
+      (!root.hasAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+    const next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("pecha-theme", next); } catch (e) {}
+    if (pdfDoc) renderPage();
+  });
+
+  // ── Autosave ────────────────────────────────────────────────────────────
+  let saveTimer = null;
+  function markDirty() {
+    el.saveInd.classList.add("saving");
+    el.saveText.textContent = "Saving…";
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 1200);
+  }
+  function saveNow() {
+    if (!cur) return;
+    cur.updatedAt = Date.now();
+    cur.text = el.editor.value;
+    DB.putProject(stripBlob(cur)).then(() => {
+      el.saveInd.classList.remove("saving");
+      el.saveText.textContent = "Saved";
+    }).catch(() => { el.saveText.textContent = "Save failed"; });
+  }
+  function stripBlob(p) {
+    // project record never carries the PDF bytes (those live in the pdfs store)
+    const { _pdfData, ...rest } = p;
+    return rest;
+  }
+
+  // ── Project record factory ───────────────────────────────────────────────
+  function newProjectRecord(name) {
+    return {
+      id: uid(), name: name, createdAt: Date.now(), updatedAt: Date.now(),
+      text: "", pageNum: 1, scale: 1, fitMode: true, splitRatio: 0.5, fontSize: 22,
+      bookmarks: [], here: null, pdfName: null, layout: "cols",
+      guide: { page: null, xNorm: 0, yNorm: 0, enabled: false },
+    };
+  }
+
+  // ── Load / switch projects ────────────────────────────────────────────────
+  async function refreshProjects() {
+    projects = (await DB.allProjects()) || [];
+    projects.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async function openProject(p) {
+    cur = p;
+    pdfDoc = null;
+    el.projName.textContent = p.name;
+    el.editor.value = p.text || "";
+    oldValue = el.editor.value;
+    setFontSize(p.fontSize || 22, false);
+    applyLayout(p.layout || "cols");
+    applySplit(p.splitRatio || 0.5);
+    el.crosshairBtn.classList.toggle("on", !!(p.guide && p.guide.enabled));
+    pageNum = p.pageNum || 1;
+    scale = p.scale || 1;
+    fitMode = p.fitMode !== false;
+    renderBackdrop();
+    renderBookmarkMenu();
+    updateCharInd();
+    el.saveInd.classList.remove("saving");
+    el.saveText.textContent = "Saved";
+    // load the PDF if this project has one
+    if (p.pdfName) {
+      try {
+        const rec = await DB.getPdf(p.id);
+        if (rec && rec.data) await loadPdfData(rec.data.slice(0));
+      } catch (e) { showPdfEmpty(); }
+    } else { showPdfEmpty(); }
+  }
+
+  async function createProject() {
+    const name = (prompt("Name this project", "Untitled pecha") || "").trim() || "Untitled pecha";
+    const p = newProjectRecord(name);
+    await DB.putProject(stripBlob(p));
+    await refreshProjects();
+    await openProject(p);
+    closeMenus();
+  }
+
+  async function renameProject(p) {
+    const name = (prompt("Rename project", p.name) || "").trim();
+    if (!name) return;
+    p.name = name; p.updatedAt = Date.now();
+    await DB.putProject(stripBlob(p));
+    if (cur && cur.id === p.id) el.projName.textContent = name;
+    await refreshProjects();
+    renderProjectMenu();
+  }
+
+  async function deleteProject(p) {
+    if (!confirmInline("Delete “" + p.name + "”? This removes its text, scan and bookmarks.")) return;
+    await DB.delProject(p.id);
+    await DB.delPdf(p.id).catch(() => {});
+    await refreshProjects();
+    if (cur && cur.id === p.id) {
+      if (projects.length) await openProject(projects[0]);
+      else { cur = null; el.projName.textContent = "—"; el.editor.value = ""; oldValue = "";
+        renderBackdrop(); renderBookmarkMenu(); showPdfEmpty(); }
+    }
+    renderProjectMenu();
+  }
+
+  // prompt()/confirm() are unavailable inside the sandbox viewer; fall back
+  // to a built-in inline path so the app still works there.
+  function confirmInline(msg) {
+    const r = window.confirm(msg);
+    return r === true;
+  }
+
+  // ── Project menu ──────────────────────────────────────────────────────────
+  function renderProjectMenu() {
+    const m = el.projMenu;
+    m.innerHTML = "";
+    if (!projects.length) {
+      const d = document.createElement("div"); d.className = "empty"; d.textContent = "No projects yet.";
+      m.appendChild(d); return;
+    }
+    projects.forEach((p) => {
+      const row = document.createElement("div"); row.className = "mi-row";
+      const open = document.createElement("button");
+      open.textContent = p.name + (cur && cur.id === p.id ? "  •" : "");
+      open.addEventListener("click", async () => { await openProject(p); closeMenus(); await refreshProjects(); });
+      const ren = document.createElement("button"); ren.className = "del"; ren.textContent = "✎"; ren.title = "Rename";
+      ren.style.color = "var(--fg-dim)";
+      ren.addEventListener("click", (e) => { e.stopPropagation(); renameProject(p); });
+      const del = document.createElement("button"); del.className = "del"; del.textContent = "🗑"; del.title = "Delete";
+      del.addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
+      row.append(open, ren, del);
+      m.appendChild(row);
+    });
+  }
+
+  // ── PDF loading & rendering ──────────────────────────────────────────────
+  function showPdfEmpty() {
+    el.pdfEmpty.classList.remove("hidden");
+    el.canvasWrap.classList.add("hidden");
+    el.pageInd.textContent = "— / —";
+  }
+  async function loadPdfData(arrayBuffer) {
+    const task = PDFJS.getDocument({ data: arrayBuffer });
+    pdfDoc = await task.promise;
+    el.pdfEmpty.classList.add("hidden");
+    el.canvasWrap.classList.remove("hidden");
+    if (pageNum > pdfDoc.numPages) pageNum = 1;
+    await renderPage();
+  }
+
+  async function renderPage() {
+    if (!pdfDoc) return;
+    const token = ++renderToken;
+    const page = await pdfDoc.getPage(pageNum);
+    if (token !== renderToken) return;
+    const dpr = window.devicePixelRatio || 1;
+    let useScale = scale;
+    if (fitMode) {
+      const avail = el.pdfScroll.clientWidth - 32;
+      const base = page.getViewport({ scale: 1 });
+      useScale = Math.max(0.1, avail / base.width);
+      scale = useScale;
+    }
+    const vp = page.getViewport({ scale: useScale });
+    const c = el.canvas, ctx = c.getContext("2d");
+    c.width = Math.floor(vp.width * dpr);
+    c.height = Math.floor(vp.height * dpr);
+    c.style.width = vp.width + "px";
+    c.style.height = vp.height + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    if (token !== renderToken) return;
+    el.pageInd.textContent = pageNum + " / " + pdfDoc.numPages;
+    el.prevPage.disabled = pageNum <= 1;
+    el.nextPage.disabled = pageNum >= pdfDoc.numPages;
+    positionCrosshair();
+  }
+
+  function gotoPage(n) {
+    if (!pdfDoc) return;
+    pageNum = Math.min(Math.max(n, 1), pdfDoc.numPages);
+    if (cur) { cur.pageNum = pageNum; markDirty(); }
+    renderPage();
+  }
+
+  // ── Reading crosshair ──────────────────────────────────────────────────────
+  function crosshairEnabled() { return !!(cur && cur.guide && cur.guide.enabled); }
+  function positionCrosshair() {
+    const g = cur && cur.guide;
+    const show = g && g.enabled && g.page === pageNum &&
+      el.canvas.style.width && !el.canvasWrap.classList.contains("hidden");
+    if (!show) { el.crosshair.style.display = "none"; return; }
+    el.crosshair.style.display = "block";
+    el.crosshair.style.setProperty("--cx", (g.xNorm * 100) + "%");
+    el.crosshair.style.setProperty("--cy", (g.yNorm * 100) + "%");
+  }
+  el.crosshairBtn.addEventListener("click", () => {
+    if (!cur) return;
+    cur.guide = cur.guide || { page: null, xNorm: 0, yNorm: 0, enabled: false };
+    cur.guide.enabled = !cur.guide.enabled;
+    el.crosshairBtn.classList.toggle("on", cur.guide.enabled);
+    el.canvasWrap.classList.toggle("placing", cur.guide.enabled);
+    positionCrosshair();
+    markDirty();
+  });
+  el.canvasWrap.addEventListener("click", (e) => {
+    if (!crosshairEnabled() || !pdfDoc) return;
+    const r = el.canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width;
+    const y = (e.clientY - r.top) / r.height;
+    cur.guide.page = pageNum;
+    cur.guide.xNorm = Math.min(Math.max(x, 0), 1);
+    cur.guide.yNorm = Math.min(Math.max(y, 0), 1);
+    positionCrosshair();
+    markDirty();
+  });
+
+  // ── Editor: marks that track position across edits ──────────────────────────
+  //   Two kinds: yellow permanent bookmarks (cur.bookmarks, many) and a single
+  //   maroon "you are here" marker (cur.here). Both shift as the text is edited.
+  function bookmarks() { return (cur && cur.bookmarks) || []; }
+  function allMarks() {
+    const list = bookmarks().map((b) => ({ ...b, kind: "bm" }));
+    if (cur && cur.here) list.push({ ...cur.here, kind: "here" });
+    return list;
+  }
+
+  function renderBackdrop() {
+    const text = el.editor.value;
+    const marks = allMarks().sort((a, b) => a.start - b.start || (a.kind === "here" ? -1 : 1));
+    let html = "", cursor = 0;
+    for (const b of marks) {
+      const s = Math.max(0, Math.min(b.start, text.length));
+      const e = Math.max(s, Math.min(b.start + b.len, text.length));
+      if (s < cursor || e <= s) continue;               // skip overlaps / empties
+      html += esc(text.slice(cursor, s));
+      html += '<mark class="' + b.kind + '">' + esc(text.slice(s, e)) + "</mark>";
+      cursor = e;
+    }
+    html += esc(text.slice(cursor));
+    el.backdrop.innerHTML = html + "\n";                 // trailing nl mirrors textarea
+    syncScroll();
+  }
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function syncScroll() {
+    el.backdrop.scrollTop = el.editor.scrollTop;
+    el.backdrop.scrollLeft = el.editor.scrollLeft;
+  }
+
+  // Shift / drop a single mark for a contiguous edit (ported from iOS).
+  function shiftOne(m, changeLoc, changeEnd, delta) {
+    const mEnd = m.start + m.len;
+    if (changeLoc >= mEnd) return m;                           // edit after → unchanged
+    if (changeEnd <= m.start) return { ...m, start: m.start + delta }; // before → shift
+    return null;                                               // overlap → drop
+  }
+  function shiftBookmarks(changeLoc, changeLen, insertedLen) {
+    const delta = insertedLen - changeLen;
+    const changeEnd = changeLoc + changeLen;
+    cur.bookmarks = bookmarks().map((bm) => shiftOne(bm, changeLoc, changeEnd, delta)).filter(Boolean);
+    if (cur.here) cur.here = shiftOne(cur.here, changeLoc, changeEnd, delta);
+  }
+
+  function onEditorInput() {
+    const nv = el.editor.value;
+    const ov = oldValue;
+    if (cur) {
+      // common prefix / suffix → the single changed range
+      let s = 0; const minLen = Math.min(ov.length, nv.length);
+      while (s < minLen && ov[s] === nv[s]) s++;
+      let e = 0;
+      while (e < (ov.length - s) && e < (nv.length - s) && ov[ov.length - 1 - e] === nv[nv.length - 1 - e]) e++;
+      const changeLoc = s;
+      const changeLen = ov.length - e - s;      // chars removed
+      const insertedLen = nv.length - e - s;    // chars inserted
+      if (bookmarks().length || cur.here) shiftBookmarks(changeLoc, changeLen, insertedLen);
+    }
+    oldValue = nv;
+    renderBackdrop();
+    renderBookmarkMenu();
+    updateCharInd();
+    if (!el.findBar.classList.contains("hidden")) recomputeMatches();
+    markDirty();
+  }
+
+  function wordRangeAt(text, loc) {
+    const n = text.length;
+    if (!n) return { start: 0, len: 0 };
+    const isSep = (i) => (i < 0 || i >= n) ? true : SEP.has(text[i]);
+    let start = Math.min(Math.max(loc, 0), n), end = start;
+    while (start > 0 && !isSep(start - 1)) start--;
+    while (end < n && !isSep(end)) end++;
+    return { start, len: end - start };
+  }
+
+  function toggleBookmark() {
+    if (!cur) return;
+    const text = el.editor.value;
+    let start = el.editor.selectionStart, end = el.editor.selectionEnd;
+    if (start === end) { const w = wordRangeAt(text, start); start = w.start; end = w.start + w.len; }
+    if (end <= start) return;
+    const sel = { start, len: end - start };
+    const overlapping = bookmarks().filter((b) =>
+      Math.max(b.start, sel.start) < Math.min(b.start + b.len, sel.start + sel.len));
+    if (overlapping.length) {
+      const ids = new Set(overlapping.map((b) => b.id));
+      cur.bookmarks = bookmarks().filter((b) => !ids.has(b.id));
+    } else {
+      const word = text.slice(start, end).trim();
+      cur.bookmarks = bookmarks().concat([{ id: uid(), start: start, len: sel.len, word: word }]);
+    }
+    renderBackdrop();
+    renderBookmarkMenu();
+    markDirty();
+  }
+
+  // Move the single maroon "you are here" marker to the current word.
+  function setHere() {
+    if (!cur) return;
+    const text = el.editor.value;
+    let start = el.editor.selectionStart, end = el.editor.selectionEnd;
+    if (start === end) { const w = wordRangeAt(text, start); start = w.start; end = w.start + w.len; }
+    if (end <= start) return;
+    cur.here = { start: start, len: end - start, word: text.slice(start, end).trim() };
+    renderBackdrop();
+    renderBookmarkMenu();
+    markDirty();
+  }
+
+  function markRow(label, kindClass, onGo, onDel) {
+    const row = document.createElement("div"); row.className = "mi-row";
+    const go = document.createElement("button"); go.className = "go tib";
+    const dot = document.createElement("span"); dot.className = "dot-sm " + kindClass;
+    const span = document.createElement("span"); span.textContent = label;
+    go.append(dot, span);
+    go.addEventListener("click", onGo);
+    const del = document.createElement("button"); del.className = "del"; del.textContent = "✕";
+    del.addEventListener("click", (e) => { e.stopPropagation(); onDel(); });
+    row.append(go, del);
+    return row;
+  }
+
+  function renderBookmarkMenu() {
+    const m = el.bmMenu; m.innerHTML = "";
+    const here = cur && cur.here;
+    const bms = bookmarks().slice().sort((a, b) => a.start - b.start);
+    if (!here && !bms.length) {
+      const d = document.createElement("div"); d.className = "empty";
+      d.textContent = "No marks yet. Use ☆ Bookmark or ⦿ Here.";
+      m.appendChild(d); return;
+    }
+    if (here) {
+      const head = document.createElement("div"); head.className = "mi-head"; head.textContent = "You are here";
+      m.appendChild(head);
+      m.appendChild(markRow(
+        here.word && here.word.length ? here.word : "(blank)", "here",
+        () => { jumpTo(here.start, here.start + here.len); closeMenus(); },
+        () => { cur.here = null; renderBackdrop(); renderBookmarkMenu(); markDirty(); }
+      ));
+    }
+    if (bms.length) {
+      const head = document.createElement("div"); head.className = "mi-head"; head.textContent = "Bookmarks";
+      m.appendChild(head);
+      bms.forEach((b) => {
+        m.appendChild(markRow(
+          b.word && b.word.length ? b.word : "(blank)", "bm",
+          () => { jumpTo(b.start, b.start + b.len); closeMenus(); },
+          () => { cur.bookmarks = bookmarks().filter((x) => x.id !== b.id); renderBackdrop(); renderBookmarkMenu(); markDirty(); }
+        ));
+      });
+    }
+  }
+
+  function jumpTo(start, end) {
+    el.editor.focus();
+    el.editor.setSelectionRange(start, end);
+    // scroll the selection roughly into view
+    const ratio = el.editor.value.length ? start / el.editor.value.length : 0;
+    el.editor.scrollTop = Math.max(0, ratio * (el.editor.scrollHeight - el.editor.clientHeight) - 40);
+    syncScroll();
+    updateCharInd();
+  }
+
+  // ── Find & Replace (substring, Tibetan Unicode) ───────────────────────────
+  function recomputeMatches() {
+    const q = el.findInput.value;
+    matches = [];
+    if (q) {
+      const t = el.editor.value; let i = 0;
+      while (true) {
+        const idx = t.indexOf(q, i);
+        if (idx === -1) break;
+        matches.push({ start: idx, len: q.length });
+        i = idx + Math.max(q.length, 1);
+      }
+    }
+    if (matchIdx >= matches.length) matchIdx = Math.max(matches.length - 1, 0);
+    el.findCount.textContent = (matches.length ? (matchIdx + 1) : 0) + " / " + matches.length;
+  }
+  function goToMatch() {
+    if (!matches.length) return;
+    matchIdx = Math.min(Math.max(matchIdx, 0), matches.length - 1);
+    const m = matches[matchIdx];
+    jumpTo(m.start, m.start + m.len);
+    el.findCount.textContent = (matchIdx + 1) + " / " + matches.length;
+  }
+  function findNext() { recomputeMatches(); if (!matches.length) return; matchIdx = (matchIdx + 1) % matches.length; goToMatch(); }
+  function findPrev() { recomputeMatches(); if (!matches.length) return; matchIdx = (matchIdx - 1 + matches.length) % matches.length; goToMatch(); }
+  function replaceOne() {
+    recomputeMatches();
+    if (!matches.length) return;
+    const m = matches[Math.min(matchIdx, matches.length - 1)];
+    const rep = el.replaceInput.value;
+    const t = el.editor.value;
+    el.editor.value = t.slice(0, m.start) + rep + t.slice(m.start + m.len);
+    // treat as a contiguous edit so bookmarks shift
+    if (cur && bookmarks().length) shiftBookmarks(m.start, m.len, rep.length);
+    oldValue = el.editor.value;
+    renderBackdrop(); renderBookmarkMenu(); updateCharInd();
+    recomputeMatches(); markDirty();
+    if (matches.length) goToMatch();
+  }
+  function replaceAllNow() {
+    const q = el.findInput.value; if (!q) return;
+    const rep = el.replaceInput.value;
+    const t = el.editor.value;
+    // collect matches up front so bookmark offsets can be recomputed exactly
+    const ms = []; let i = 0;
+    while (true) { const idx = t.indexOf(q, i); if (idx === -1) break; ms.push(idx); i = idx + Math.max(q.length, 1); }
+    if (!ms.length) return;
+    const d = rep.length - q.length;
+    const remap = (mk) => {
+      let shift = 0, dropped = false;
+      for (const start of ms) {
+        const mEnd = start + q.length;
+        if (Math.max(start, mk.start) < Math.min(mEnd, mk.start + mk.len)) { dropped = true; break; }
+        if (mEnd <= mk.start) shift += d;
+      }
+      return dropped ? null : { ...mk, start: mk.start + shift };
+    };
+    if (cur && bookmarks().length) cur.bookmarks = bookmarks().map(remap).filter(Boolean);
+    if (cur && cur.here) cur.here = remap(cur.here);
+    el.editor.value = t.split(q).join(rep);
+    oldValue = el.editor.value;
+    renderBackdrop(); renderBookmarkMenu(); updateCharInd();
+    recomputeMatches(); markDirty();
+  }
+
+  // ── Font size & misc editor controls ───────────────────────────────────────
+  function setFontSize(px, persist) {
+    px = Math.min(44, Math.max(12, px));
+    document.documentElement.style.setProperty("--editor-fs", px + "px");
+    if (cur) cur.fontSize = px;
+    if (persist) markDirty();
+  }
+  function updateCharInd() {
+    const total = el.editor.value.length;
+    const pos = el.editor.selectionStart;
+    el.charInd.textContent = total ? (pos + " / " + total) : "0 / 0";
+  }
+
+  // ── Layout (side-by-side ↔ stacked) & split resize ──────────────────────────
+  function isVertical() { return el.main.classList.contains("rows"); }
+  function applyLayout(mode) {
+    const rows = mode === "rows";
+    el.main.classList.toggle("rows", rows);
+    el.layoutBtn.textContent = rows ? "⬓ Stacked" : "◫ Side by side";
+    el.layoutBtn.title = rows
+      ? "Panes stacked (PDF above, text below) — click for side-by-side"
+      : "Panes side-by-side (PDF left, text right) — click to stack";
+  }
+  function applySplit(ratio) {
+    // flex-basis is a % of the main axis, so this works for both orientations
+    ratio = Math.min(0.8, Math.max(0.2, ratio));
+    el.pdfPane.style.flex = "0 0 " + (ratio * 100) + "%";
+    el.textPane.style.flex = "1 1 0";
+  }
+  (function splitDrag() {
+    let dragging = false;
+    const onMove = (clientX, clientY) => {
+      const r = el.main.getBoundingClientRect();
+      const vertical = isVertical();
+      let ratio = vertical ? (clientY - r.top) / r.height : (clientX - r.left) / r.width;
+      ratio = Math.min(0.8, Math.max(0.2, ratio));
+      applySplit(ratio);
+      if (cur) cur.splitRatio = ratio;
+    };
+    el.splitter.addEventListener("mousedown", (e) => { dragging = true; e.preventDefault(); });
+    window.addEventListener("mousemove", (e) => { if (dragging) onMove(e.clientX, e.clientY); });
+    window.addEventListener("mouseup", () => { if (dragging) { dragging = false; markDirty(); if (fitMode) renderPage(); } });
+    el.splitter.addEventListener("touchmove", (e) => { const t = e.touches[0]; onMove(t.clientX, t.clientY); e.preventDefault(); }, { passive: false });
+    el.splitter.addEventListener("touchend", () => { markDirty(); if (fitMode) renderPage(); });
+    el.splitter.addEventListener("dblclick", () => { applySplit(0.5); if (cur) cur.splitRatio = 0.5; markDirty(); if (fitMode) renderPage(); });
+  })();
+
+  // ── Menus ──────────────────────────────────────────────────────────────────
+  function closeMenus() { el.projMenu.classList.add("hidden"); el.bmMenu.classList.add("hidden"); }
+  el.projBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const show = el.projMenu.classList.contains("hidden");
+    closeMenus();
+    if (show) { renderProjectMenu(); el.projMenu.classList.remove("hidden"); }
+  });
+  el.bmListBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const show = el.bmMenu.classList.contains("hidden");
+    closeMenus();
+    if (show) { renderBookmarkMenu(); el.bmMenu.classList.remove("hidden"); }
+  });
+  document.addEventListener("click", closeMenus);
+  el.projMenu.addEventListener("click", (e) => e.stopPropagation());
+  el.bmMenu.addEventListener("click", (e) => e.stopPropagation());
+
+  // ── Import / export ─────────────────────────────────────────────────────────
+  el.openPdfBtn.addEventListener("click", () => { if (!cur) { alert("Create or open a project first."); return; } el.pdfFile.click(); });
+  el.pdfFile.addEventListener("change", async () => {
+    const f = el.pdfFile.files && el.pdfFile.files[0]; if (!f || !cur) return;
+    const buf = await f.arrayBuffer();
+    await DB.putPdf(cur.id, buf.slice(0), f.name);
+    cur.pdfName = f.name; pageNum = 1; cur.pageNum = 1;
+    cur.guide = { page: null, xNorm: 0, yNorm: 0, enabled: false };
+    el.crosshairBtn.classList.remove("on");
+    await loadPdfData(buf.slice(0));
+    markDirty();
+    el.pdfFile.value = "";
+  });
+  el.importTxtBtn.addEventListener("click", () => { if (!cur) { alert("Create or open a project first."); return; } el.txtFile.click(); });
+  el.txtFile.addEventListener("change", async () => {
+    const f = el.txtFile.files && el.txtFile.files[0]; if (!f || !cur) return;
+    let text = await f.text();
+    text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    if (el.editor.value.trim() && !confirmInline("Replace the current text with the imported file?")) { el.txtFile.value = ""; return; }
+    el.editor.value = text; oldValue = text;
+    cur.bookmarks = []; cur.here = null;
+    renderBackdrop(); renderBookmarkMenu(); updateCharInd(); markDirty();
+    el.txtFile.value = "";
+  });
+  el.exportTxtBtn.addEventListener("click", async () => {
+    const name = ((cur && cur.name) || "pecha").replace(/[^\wༀ-࿿ .-]/g, "_");
+    const text = el.editor.value;
+    // In the claude.ai artifact viewer, a plain download link is inert — use
+    // the downloads capability. Elsewhere (GitHub Pages, a local file) fall
+    // back to a normal download link.
+    try {
+      const dl = (window.claude && window.claude.use) ? await window.claude.use("downloads") : null;
+      if (dl && dl.save) {
+        try { await dl.save({ filename: name + ".txt", data: text }); return; }
+        catch (e) { if (e && e.code === "declined") return; }
+      }
+    } catch (e) { /* fall through to link */ }
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name + ".txt";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  // ── Wire up controls ─────────────────────────────────────────────────────────
+  el.newProjBtn.addEventListener("click", createProject);
+  el.layoutBtn.addEventListener("click", () => {
+    const next = isVertical() ? "cols" : "rows";
+    if (cur) cur.layout = next;
+    applyLayout(next);
+    applySplit((cur && cur.splitRatio) || 0.5);
+    if (fitMode && pdfDoc) renderPage();
+    markDirty();
+  });
+  el.prevPage.addEventListener("click", () => gotoPage(pageNum - 1));
+  el.nextPage.addEventListener("click", () => gotoPage(pageNum + 1));
+  el.zoomIn.addEventListener("click", () => { fitMode = false; scale = Math.min(6, scale * 1.2); if (cur) { cur.scale = scale; cur.fitMode = false; } renderPage(); markDirty(); });
+  el.zoomOut.addEventListener("click", () => { fitMode = false; scale = Math.max(0.15, scale / 1.2); if (cur) { cur.scale = scale; cur.fitMode = false; } renderPage(); markDirty(); });
+  el.zoomFit.addEventListener("click", () => { fitMode = true; if (cur) cur.fitMode = true; renderPage(); markDirty(); });
+
+  el.editor.addEventListener("input", onEditorInput);
+  el.editor.addEventListener("scroll", syncScroll);
+  el.editor.addEventListener("keyup", updateCharInd);
+  el.editor.addEventListener("click", updateCharInd);
+  el.editor.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") { e.preventDefault(); openFind(); }
+  });
+
+  el.fsDown.addEventListener("click", () => setFontSize((cur ? cur.fontSize : 22) - 2, true));
+  el.fsUp.addEventListener("click", () => setFontSize((cur ? cur.fontSize : 22) + 2, true));
+  el.bookmarkBtn.addEventListener("click", toggleBookmark);
+  el.hereBtn.addEventListener("click", setHere);
+  el.selectAllBtn.addEventListener("click", () => { el.editor.focus(); el.editor.select(); updateCharInd(); });
+  el.scrollTop.addEventListener("click", () => { el.editor.scrollTop = 0; syncScroll(); });
+  el.scrollBottom.addEventListener("click", () => { el.editor.scrollTop = el.editor.scrollHeight; syncScroll(); });
+
+  function openFind() {
+    el.findBar.classList.remove("hidden");
+    el.findInput.focus(); el.findInput.select();
+    recomputeMatches();
+  }
+  el.findToggle.addEventListener("click", () => {
+    if (el.findBar.classList.contains("hidden")) openFind();
+    else { el.findBar.classList.add("hidden"); matches = []; }
+  });
+  el.findClose.addEventListener("click", () => { el.findBar.classList.add("hidden"); matches = []; });
+  el.findInput.addEventListener("input", () => { matchIdx = 0; recomputeMatches(); goToMatch(); });
+  el.findInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.shiftKey ? findPrev() : findNext(); } });
+  el.findNext.addEventListener("click", findNext);
+  el.findPrev.addEventListener("click", findPrev);
+  el.replaceOne.addEventListener("click", replaceOne);
+  el.replaceAll.addEventListener("click", replaceAllNow);
+
+  let rT = null;
+  window.addEventListener("resize", () => { if (rT) clearTimeout(rT); rT = setTimeout(() => { if (fitMode && pdfDoc) renderPage(); }, 150); });
+  window.addEventListener("beforeunload", () => { if (saveTimer) { clearTimeout(saveTimer); saveNow(); } });
+
+  // ── Boot ─────────────────────────────────────────────────────────────────────
+  (async function boot() {
+    try { await refreshProjects(); } catch (e) { projects = []; }
+    if (projects.length) await openProject(projects[0]);
+    else {
+      // first run: seed a starter project so the workspace opens in a usable state
+      const p = newProjectRecord("Untitled pecha");
+      try { await DB.putProject(stripBlob(p)); await refreshProjects(); } catch (e) {}
+      await openProject(p);
+    }
+  })();
+})();
+</script>
