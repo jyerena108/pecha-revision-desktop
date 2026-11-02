@@ -529,7 +529,7 @@
     return {
       id: uid(), name: name, createdAt: Date.now(), updatedAt: Date.now(),
       text: "", pageNum: 1, scale: 1, fitMode: true, splitRatio: 0.5, fontSize: 22,
-      bookmarks: [], here: null, pdfName: null, layout: "cols",
+      bookmarks: [], here: null, pdfName: null, layout: "rows",
       guide: { page: null, xNorm: 0, yNorm: 0, enabled: false },
     };
   }
@@ -547,7 +547,7 @@
     el.editor.value = p.text || "";
     oldValue = el.editor.value;
     setFontSize(p.fontSize || 22, false);
-    applyLayout(p.layout || "cols");
+    applyLayout(p.layout || "rows");
     applySplit(p.splitRatio || 0.5);
     el.crosshairBtn.classList.toggle("on", !!(p.guide && p.guide.enabled));
     pageNum = p.pageNum || 1;
