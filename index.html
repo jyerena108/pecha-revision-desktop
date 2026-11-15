@@ -377,6 +377,9 @@
           <div class="menu right hidden" id="bmMenu"></div>
         </div>
         <div class="sep"></div>
+        <button class="btn" id="convertBtn" title="Convert the whole text to the other script — auto-detects Wylie vs Tibetan" disabled>⇄ Convert</button>
+        <button class="btn" id="convertUndoBtn" title="Undo the last conversion" hidden>↩ Undo</button>
+        <div class="sep"></div>
         <button class="btn" id="selectAllBtn" title="Select all text">Select all</button>
         <button class="btn icon" id="scrollTop" title="Scroll to top" aria-label="Scroll to top">⤒</button>
         <button class="btn icon" id="scrollBottom" title="Scroll to bottom" aria-label="Scroll to bottom">⤓</button>
@@ -397,6 +400,7 @@
 <input type="file" id="txtFile" accept=".txt,text/plain" class="sr">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsewts@1.0.4/src/jsewts.js"></script>
 <script>
 "use strict";
 (function () {
@@ -431,6 +435,7 @@
     findToggle: $("findToggle"), fsDown: $("fsDown"), fsUp: $("fsUp"),
     bookmarkBtn: $("bookmarkBtn"), hereBtn: $("hereBtn"), bmListBtn: $("bmListBtn"), bmMenu: $("bmMenu"),
     selectAllBtn: $("selectAllBtn"), scrollTop: $("scrollTop"), scrollBottom: $("scrollBottom"), charInd: $("charInd"),
+    convertBtn: $("convertBtn"), convertUndoBtn: $("convertUndoBtn"),
     backdrop: $("backdrop"), editor: $("editor"),
     pdfFile: $("pdfFile"), txtFile: $("txtFile"),
   };
@@ -482,6 +487,7 @@
   let oldValue = "";          // editor value before the latest edit
   let matches = [];           // find match ranges [{start,len}]
   let matchIdx = 0;
+  let convertUndo = null;     // snapshot before the last script conversion
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -556,6 +562,8 @@
     renderBackdrop();
     renderBookmarkMenu();
     updateCharInd();
+    convertUndo = null; el.convertUndoBtn.hidden = true;
+    updateConvertLabel();
     el.saveInd.classList.remove("saving");
     el.saveText.textContent = "Saved";
     // load the PDF if this project has one
@@ -773,9 +781,11 @@
       if (bookmarks().length || cur.here) shiftBookmarks(changeLoc, changeLen, insertedLen);
     }
     oldValue = nv;
+    if (convertUndo) { convertUndo = null; el.convertUndoBtn.hidden = true; }  // manual edit ends the undo window
     renderBackdrop();
     renderBookmarkMenu();
     updateCharInd();
+    updateConvertLabel();
     if (!el.findBar.classList.contains("hidden")) recomputeMatches();
     markDirty();
   }
@@ -956,6 +966,50 @@
     el.charInd.textContent = total ? (pos + " / " + total) : "0 / 0";
   }
 
+  // ── Wylie ↔ Tibetan script conversion (whole text) ──────────────────────────
+  //   Tibetan Unicode lives in U+0F00–U+0FFF; Wylie is plain Latin. So the
+  //   presence of any Tibetan character tells us the script, and Convert flips
+  //   the whole text to the other one. Conversion uses jsEWTS (same lineage as
+  //   the collation tool's pyewts), loaded from a CDN.
+  function hasTibetan(s) {
+    for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c >= 0x0F00 && c <= 0x0FFF) return true; }
+    return false;
+  }
+  function updateConvertLabel() {
+    const text = el.editor.value;
+    if (!text.trim()) { el.convertBtn.textContent = "⇄ Convert"; el.convertBtn.disabled = true; return; }
+    el.convertBtn.disabled = false;
+    if (hasTibetan(text)) { el.convertBtn.textContent = "⇄ To Wylie"; el.convertBtn.title = "Convert all text from Tibetan script to Wylie"; }
+    else { el.convertBtn.textContent = "⇄ To Tibetan"; el.convertBtn.title = "Convert all text from Wylie to Tibetan script"; }
+  }
+  function convertScript() {
+    const text = el.editor.value;
+    if (!text.trim()) return;
+    if (!(window.jsEWTS && window.jsEWTS.fromWylie)) {
+      alert("The script converter is still loading (it needs a connection the first time it's used). Try again in a moment.");
+      return;
+    }
+    const toWylie = hasTibetan(text);
+    let out;
+    try { out = toWylie ? window.jsEWTS.toWylie(text) : window.jsEWTS.fromWylie(text); }
+    catch (e) { alert("Conversion failed on this text."); return; }
+    // snapshot for one-step undo; marks are dropped since their offsets no longer map
+    convertUndo = { text: text, bookmarks: bookmarks().slice(), here: cur ? cur.here : null };
+    el.editor.value = out; oldValue = out;
+    if (cur) { cur.bookmarks = []; cur.here = null; }
+    el.convertUndoBtn.hidden = false;
+    renderBackdrop(); renderBookmarkMenu(); updateCharInd(); updateConvertLabel();
+    markDirty();
+  }
+  function undoConvert() {
+    if (!convertUndo) return;
+    el.editor.value = convertUndo.text; oldValue = convertUndo.text;
+    if (cur) { cur.bookmarks = convertUndo.bookmarks; cur.here = convertUndo.here; }
+    convertUndo = null; el.convertUndoBtn.hidden = true;
+    renderBackdrop(); renderBookmarkMenu(); updateCharInd(); updateConvertLabel();
+    markDirty();
+  }
+
   // ── Layout (side-by-side ↔ stacked) & split resize ──────────────────────────
   function isVertical() { return el.main.classList.contains("rows"); }
   function applyLayout(mode) {
@@ -1029,11 +1083,14 @@
     if (el.editor.value.trim() && !confirmInline("Replace the current text with the imported file?")) { el.txtFile.value = ""; return; }
     el.editor.value = text; oldValue = text;
     cur.bookmarks = []; cur.here = null;
-    renderBackdrop(); renderBookmarkMenu(); updateCharInd(); markDirty();
+    convertUndo = null; el.convertUndoBtn.hidden = true;
+    renderBackdrop(); renderBookmarkMenu(); updateCharInd(); updateConvertLabel(); markDirty();
     el.txtFile.value = "";
   });
   el.exportTxtBtn.addEventListener("click", async () => {
-    const name = ((cur && cur.name) || "pecha").replace(/[^\wༀ-࿿ .-]/g, "_");
+    const tibRange = String.fromCharCode(0x0F00) + "-" + String.fromCharCode(0x0FFF);
+    const nameRe = new RegExp("[^\\w" + tibRange + " .-]", "g");
+    const name = ((cur && cur.name) || "pecha").replace(nameRe, "_");
     const text = el.editor.value;
     // In the claude.ai artifact viewer, a plain download link is inert — use
     // the downloads capability. Elsewhere (GitHub Pages, a local file) fall
@@ -1091,6 +1148,8 @@
   el.bookmarkBtn.addEventListener("click", toggleBookmark);
   el.hereBtn.addEventListener("click", setHere);
   el.selectAllBtn.addEventListener("click", () => { el.editor.focus(); el.editor.select(); updateCharInd(); });
+  el.convertBtn.addEventListener("click", convertScript);
+  el.convertUndoBtn.addEventListener("click", undoConvert);
   el.scrollTop.addEventListener("click", () => { el.editor.scrollTop = 0; syncScroll(); });
   el.scrollBottom.addEventListener("click", () => { el.editor.scrollTop = el.editor.scrollHeight; syncScroll(); });
 
