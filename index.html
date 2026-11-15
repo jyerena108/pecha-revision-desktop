@@ -660,7 +660,7 @@
     const token = ++renderToken;
     const page = await pdfDoc.getPage(pageNum);
     if (token !== renderToken) return;
-    const dpr = window.devicePixelRatio || 1;
+    const rawDpr = window.devicePixelRatio || 1;
     let useScale = scale;
     if (fitMode) {
       const avail = el.pdfScroll.clientWidth - 32;
@@ -670,6 +670,11 @@
     }
     const vp = page.getViewport({ scale: useScale });
     const c = el.canvas, ctx = c.getContext("2d");
+    // Clamp the backing canvas so deep zoom never exceeds the browser's max
+    // canvas size (which would render blank). The folio is still displayed at
+    // the full zoomed CSS size; only its pixel resolution is capped.
+    const MAX_CANVAS_PX = 8192;
+    const dpr = Math.max(0.5, Math.min(rawDpr, MAX_CANVAS_PX / vp.width, MAX_CANVAS_PX / vp.height));
     c.width = Math.floor(vp.width * dpr);
     c.height = Math.floor(vp.height * dpr);
     c.style.width = vp.width + "px";
@@ -1134,7 +1139,7 @@
   el.pageInput.addEventListener("focus", () => el.pageInput.select());
   el.pageInput.addEventListener("change", jumpToTypedPage);
   el.pageInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); jumpToTypedPage(); el.pageInput.blur(); } });
-  el.zoomIn.addEventListener("click", () => { fitMode = false; scale = Math.min(6, scale * 1.2); if (cur) { cur.scale = scale; cur.fitMode = false; } renderPage(); markDirty(); });
+  el.zoomIn.addEventListener("click", () => { fitMode = false; scale = Math.min(16, scale * 1.2); if (cur) { cur.scale = scale; cur.fitMode = false; } renderPage(); markDirty(); });
   el.zoomOut.addEventListener("click", () => { fitMode = false; scale = Math.max(0.15, scale / 1.2); if (cur) { cur.scale = scale; cur.fitMode = false; } renderPage(); markDirty(); });
   el.zoomFit.addEventListener("click", () => { fitMode = true; if (cur) cur.fitMode = true; renderPage(); markDirty(); });
 
