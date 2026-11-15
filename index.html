@@ -217,8 +217,11 @@
     border-radius: 6px; padding: 5px 4px; font-size: 13px; font-family: inherit;
   }
   .pdf-bar .page-total { font-variant-numeric: tabular-nums; }
-  #pdfScroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 16px; }
-  #canvasWrap { position: relative; line-height: 0; box-shadow: var(--shadow); }
+  #pdfScroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; padding: 16px; }
+  /* margin:auto centers the folio while it fits, but collapses to 0 once the
+     folio is larger than the viewport — so a zoomed-in scan stays fully
+     scrollable to both edges. (justify-content:center strands one side.) */
+  #canvasWrap { position: relative; line-height: 0; box-shadow: var(--shadow); margin: auto; }
   #pdfCanvas { display: block; background: #fff; }
   /* Two translucent lines spanning the whole folio (as on iOS), so the
      syllables under the cross stay readable. */
